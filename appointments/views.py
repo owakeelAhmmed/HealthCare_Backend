@@ -39,7 +39,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
 
 @api_view(["GET"])
-@permission_classes([AllowAny])  # slot দেখতে login লাগবে না
+@permission_classes([AllowAny])
 def doctor_slots(request, doctor_id):
     try:
         doctor = Doctor.objects.get(id=doctor_id)
@@ -50,36 +50,34 @@ def doctor_slots(request, doctor_id):
     slots = []
     today = datetime.now().date()
 
-    # Parse available_days (e.g. "Mon,Tue,Wed")
-    available_days = [day.strip().lower() for day in doctor.available_days.split(",")]
+    # doctor.available_days string কে list এ convert
+    available_days = [day.strip() for day in doctor.available_days.split(",")]
 
-    # 1️⃣ Generate next 7 days schedule
-    for day_offset in range(7):  
+    # আজ থেকে 7 দিন check করবো (তুমি চাইলে range বাড়াতে পারো)
+    for day_offset in range(7):
         current_date = today + timedelta(days=day_offset)
 
-        # check if current day is allowed
-        if current_date.strftime("%a").lower() not in available_days:
-            continue
+        # আজকের দিনটা যদি doctor's available_days এ না থাকে → skip
+        if current_date.strftime("%A") not in available_days:
+            continue  
 
         start_time = datetime.combine(current_date, doctor.available_time_start)
         end_time = datetime.combine(current_date, doctor.available_time_end)
 
-        # 2️⃣ Generate slots in range
         while start_time + slot_duration <= end_time:
             slot_time = start_time.time()
 
-            # 3️⃣ CustomSlot override check
+            # CustomSlot check
             custom_slot = CustomSlot.objects.filter(
                 doctor=doctor,
                 date=current_date,
                 time=slot_time
             ).first()
-
             if custom_slot and not custom_slot.is_available:
                 start_time += slot_duration
                 continue
 
-            # 4️⃣ Already booked?
+            # Already booked হলে skip
             if Appointment.objects.filter(
                 doctor=doctor,
                 date=current_date,
@@ -88,7 +86,7 @@ def doctor_slots(request, doctor_id):
                 start_time += slot_duration
                 continue
 
-            # 5️⃣ Valid slot
+            # Valid slot যোগ করো
             slots.append(f"{current_date} {slot_time.strftime('%H:%M')}")
             start_time += slot_duration
 
@@ -96,6 +94,7 @@ def doctor_slots(request, doctor_id):
         "doctor": doctor.id,
         "slots": slots
     })
+
 
 
 @api_view(["POST"])
