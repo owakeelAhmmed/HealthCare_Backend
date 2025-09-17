@@ -11,12 +11,14 @@ class DoctorViewSet(viewsets.ModelViewSet):
     serializer_class = DoctorSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def create(self, request, *args, **kwargs):
-        user_id = request.data.get('user')
-        if not user_id:
-            return Response({'error': 'user_id is required'}, status=400)
-        
-        if Doctor.objects.filter(user_id=user_id).exists():
-            return Response({'error': 'This user already has a doctor profile'}, status=400)
 
-        return super().create(request, *args, **kwargs)
+    # def create(self, request, *args, **kwargs):
+    #     user_id = request.data.get('user')
+    #     if not user_id:
+    #         return Response({'error': 'user_id is required'}, status=400)
+        
+    #     if Doctor.objects.filter(user_id=user_id).exists():
+    #         return Response({'error': 'This user already has a doctor profile'}, status=400)
+
+    #     return super().create(request, *args, **kwargs)
+
