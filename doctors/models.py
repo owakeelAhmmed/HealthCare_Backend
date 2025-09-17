@@ -12,7 +12,7 @@ class Doctor(models.Model):
     experience = models.IntegerField()
     bio = models.TextField()
     consultation_fee = models.DecimalField(max_digits=10, decimal_places=2)
-    available_days = models.CharField(max_length=100)  # Comma separated days
+    available_days = models.PositiveIntegerField(default=7)
     available_time_start = models.TimeField()
     available_time_end = models.TimeField()
 

@@ -1,14 +1,13 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.exceptions import PermissionDenied
-from .models import Appointment, CustomSlot
-from .serializers import AppointmentSerializer
-from doctors.models import Doctor
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from datetime import datetime, timedelta
-from rest_framework import status
 
+from .models import Appointment, CustomSlot
+from .serializers import AppointmentSerializer
+from doctors.models import Doctor
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -19,27 +18,21 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-       
         if not user.is_authenticated:
             return Appointment.objects.none()
 
-        
-        if user.user_type == 1:
+        if user.user_type == 1:  # Patient
             return Appointment.objects.filter(patient=user)
 
-        
-        elif user.user_type == 2:
+        elif user.user_type == 2:  # Doctor
             return Appointment.objects.filter(doctor__user=user)
 
-        
-        elif user.user_type == 3:
+        elif user.user_type == 3:  # Admin
             return Appointment.objects.all()
 
-       
         return Appointment.objects.none()
 
     def perform_create(self, serializer):
-        
         if self.request.user.user_type != 1:
             raise PermissionDenied("Only patients can create appointments.")
         serializer.save(patient=self.request.user)
@@ -53,49 +46,21 @@ def doctor_slots(request, doctor_id):
     except Doctor.DoesNotExist:
         return Response({"error": "Doctor not found"}, status=404)
 
-    slot_duration = timedelta(minutes=30)  # প্রতি slot 30 মিনিট
-    slots = []
-    today = datetime.now().date()
-
-    for day_offset in range(int(doctor.available_days)):
-        current_date = today + timedelta(days=day_offset)
-        start_time = datetime.combine(current_date, doctor.available_time_start)
-        end_time = datetime.combine(current_date, doctor.available_time_end)
-
-        while start_time + slot_duration <= end_time:
-            slot_str = start_time.strftime("%Y-%m-%d %H:%M")
-
-            # already booked হলে বাদ
-            if not Appointment.objects.filter(
-                doctor=doctor,
-                date=current_date,
-                time=start_time.time()
-            ).exists():
-                slots.append(slot_str)
-
-            start_time += slot_duration
-
-    return Response({
-        "doctor": doctor.id,
-        "slots": slots
-    })
-
-
-@api_view(["GET"])
-@permission_classes([AllowAny])
-def doctor_slots(request, doctor_id):
-    try:
-        doctor = Doctor.objects.get(id=doctor_id)
-    except Doctor.DoesNotExist:
-        return Response({"error": "Doctor not found"}, status=404)
-
     slot_duration = timedelta(minutes=30)
     slots = []
     today = datetime.now().date()
 
-    # 1️⃣ Loop through available days range
-    for day_offset in range(int(doctor.available_days)):
+    # Parse available_days (e.g. "Mon,Tue,Wed")
+    available_days = [day.strip().lower() for day in doctor.available_days.split(",")]
+
+    # 1️⃣ Generate next 7 days schedule
+    for day_offset in range(7):  
         current_date = today + timedelta(days=day_offset)
+
+        # check if current day is allowed
+        if current_date.strftime("%a").lower() not in available_days:
+            continue
+
         start_time = datetime.combine(current_date, doctor.available_time_start)
         end_time = datetime.combine(current_date, doctor.available_time_end)
 
@@ -103,19 +68,18 @@ def doctor_slots(request, doctor_id):
         while start_time + slot_duration <= end_time:
             slot_time = start_time.time()
 
-            # 3️⃣ Check manual override (CustomSlot)
+            # 3️⃣ CustomSlot override check
             custom_slot = CustomSlot.objects.filter(
                 doctor=doctor,
                 date=current_date,
                 time=slot_time
             ).first()
 
-            if custom_slot:
-                if not custom_slot.is_available:  # Blocked slot
-                    start_time += slot_duration
-                    continue
+            if custom_slot and not custom_slot.is_available:
+                start_time += slot_duration
+                continue
 
-            # 4️⃣ Skip if already booked
+            # 4️⃣ Already booked?
             if Appointment.objects.filter(
                 doctor=doctor,
                 date=current_date,
@@ -124,7 +88,7 @@ def doctor_slots(request, doctor_id):
                 start_time += slot_duration
                 continue
 
-            # 5️⃣ Add slot
+            # 5️⃣ Valid slot
             slots.append(f"{current_date} {slot_time.strftime('%H:%M')}")
             start_time += slot_duration
 
@@ -135,7 +99,7 @@ def doctor_slots(request, doctor_id):
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # প্রয়োজনে IsAuthenticated + role check দেবে
+@permission_classes([IsAuthenticated])  # doctor/admin slot manage করবে
 def manage_slot(request, doctor_id):
     try:
         doctor = Doctor.objects.get(id=doctor_id)
@@ -149,8 +113,11 @@ def manage_slot(request, doctor_id):
     if not date_str or not time_str:
         return Response({"error": "Date and Time are required"}, status=400)
 
-    date = datetime.strptime(date_str, "%Y-%m-%d").date()
-    time = datetime.strptime(time_str, "%H:%M").time()
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        time = datetime.strptime(time_str, "%H:%M").time()
+    except ValueError:
+        return Response({"error": "Invalid date or time format"}, status=400)
 
     slot, created = CustomSlot.objects.update_or_create(
         doctor=doctor,
