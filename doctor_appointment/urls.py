@@ -9,6 +9,7 @@ router = routers.DefaultRouter()
 router.register('appointments', appointment_views.AppointmentViewSet)
 router.register('doctors', doctor_views.DoctorViewSet)
 
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
@@ -17,4 +18,5 @@ urlpatterns = [
     path('api/auth/', include('djoser.urls')),
     path('api/auth/', include('djoser.urls.jwt')),
     path('api/', include('appointments.urls')),
+    path('api/video/', include('video.urls')),
 ]

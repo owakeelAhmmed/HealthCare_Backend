@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'accounts',
     'doctors',
     'appointments',
+    'video',
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
