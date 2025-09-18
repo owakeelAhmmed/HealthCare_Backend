@@ -38,14 +38,18 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         serializer.save(patient=self.request.user)
     
     def perform_update(self, serializer):
+        print("Incoming data:", self.request.data)
         instance = serializer.instance
         user = self.request.user
 
-        # শুধু patient যদি own appointment pay করতে চায়
         if user.user_type == 1 and instance.patient == user:
+            # patient তার own appointment এর status update করতে পারবে
+            serializer.save()
+        elif user.user_type in [2, 3]:
             serializer.save()
         else:
             raise PermissionDenied("You cannot update this appointment.")
+
 
 
 @api_view(["GET"])
