@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from datetime import datetime, timedelta
-
+from rest_framework.decorators import action
 from .models import Appointment, CustomSlot
 from .serializers import AppointmentSerializer
 from doctors.models import Doctor
@@ -37,18 +37,24 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only patients can create appointments.")
         serializer.save(patient=self.request.user)
     
-    def perform_update(self, serializer):
-        print("Incoming data:", self.request.data)
-        instance = serializer.instance
-        user = self.request.user
-
-        if user.user_type == 1 and instance.patient == user:
-            # patient তার own appointment এর status update করতে পারবে
-            serializer.save()
-        elif user.user_type in [2, 3]:
-            serializer.save()
-        else:
-            raise PermissionDenied("You cannot update this appointment.")
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def mark_paid(self, request, pk=None):
+        appointment = self.get_object()
+        
+        # Check if user is the patient who owns this appointment
+        if request.user != appointment.patient:
+            return Response(
+                {"error": "You can only mark your own appointments as paid"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        appointment.status = 'paid'
+        appointment.save()
+        
+        return Response({
+            "message": "Appointment marked as paid successfully",
+            "status": "paid"
+        })
 
 
 
