@@ -1,6 +1,4 @@
 from django.db import models
-from accounts.models import User
-from doctors.models import Doctor
 from appointments.models import Appointment
 
 class VideoCallSession(models.Model):

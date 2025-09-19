@@ -4,19 +4,14 @@ from accounts.models import User
 from accounts.serializers import UserSerializer
 
 class DoctorSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)  
-    user_select = serializers.SlugRelatedField(
-        slug_field="username",
-        queryset=User.objects.filter(user_type=2),
-        write_only=True
-    )
+    user_details = UserSerializer(source='user', read_only=True)
+    available_hours = serializers.SerializerMethodField()
 
     class Meta:
         model = Doctor
         fields = [
             "id",
-            "user",                  
-            "user_select",           
+            "user_details",
             "specialization",
             "experience",
             "bio",
@@ -24,12 +19,40 @@ class DoctorSerializer(serializers.ModelSerializer):
             "available_days",
             "available_time_start",
             "available_time_end",
+            "available_hours",
+            "address",
+            "phone",
+            "email"
+        ]
+        read_only_fields = ['id']
+
+    def get_available_hours(self, obj):
+        return obj.available_hours
+
+class DoctorCreateSerializer(serializers.ModelSerializer):
+    user_id = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(user_type=2),
+        write_only=True,
+        source='user'
+    )
+
+    class Meta:
+        model = Doctor
+        fields = [
+            "user_id",
+            "specialization",
+            "experience",
+            "bio",
+            "consultation_fee",
+            "available_days",
+            "available_time_start",
+            "available_time_end",
+            "address",
+            "phone",
+            "email"
         ]
 
-    def create(self, validated_data):
-        user = validated_data.pop("user_select")
-        if Doctor.objects.filter(user=user).exists():
-            raise serializers.ValidationError(
-                {"user_select": "This user already has a doctor profile"}
-            )
-        return Doctor.objects.create(user=user, **validated_data)
+    def validate_user_id(self, value):
+        if Doctor.objects.filter(user=value).exists():
+            raise serializers.ValidationError("This user already has a doctor profile")
+        return value
