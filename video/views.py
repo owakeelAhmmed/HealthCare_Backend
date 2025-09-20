@@ -9,9 +9,10 @@ from .serializers import VideoCallSessionSerializer
 from appointments.models import Appointment
 from datetime import datetime, timedelta
 import uuid
+from decouple import config
 
 # Daily.co API Key (এটি আপনার environment variable থেকে নিন)
-DAILY_API_KEY ='a386c589f01d7443fa9e0d3f034505d7ae6a9566b2b9c31f50096515d1846be6'
+DAILY_API_KEY =config('dailyapi')
 DAILY_API_BASE = 'https://api.daily.co/v1'
 
 class VideoCallViewSet(viewsets.ModelViewSet):
@@ -35,6 +36,13 @@ def create_daily_room(request, appointment_id):
         elif user.user_type == 2 and appointment.doctor.user != user:
             return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
         
+        # Check if Daily API key is configured
+        if not DAILY_API_KEY:
+            return Response(
+                {"error": "Daily.co API key not configured"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
         # Create unique room name
         room_name = f"appointment-{appointment_id}-{uuid.uuid4().hex[:8]}"
         
@@ -55,9 +63,11 @@ def create_daily_room(request, appointment_id):
                     "start_video_off": False,
                     "start_audio_off": False,
                 }
-            }
+            },
+            timeout=30  # Add timeout
         )
         
+        # Better error handling for Daily.co API
         if response.status_code == 200:
             room_data = response.json()
             
@@ -79,12 +89,32 @@ def create_daily_room(request, appointment_id):
                 "message": "Daily.co room created successfully"
             })
         else:
-            return Response({"error": "Failed to create Daily.co room"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # Log the detailed error from Daily.co
+            error_details = response.json() if response.content else response.text
+            print(f"Daily.co API Error: {response.status_code} - {error_details}")
+            
+            return Response(
+                {
+                    "error": "Failed to create Daily.co room",
+                    "details": f"Daily.co API returned {response.status_code}",
+                    "daily_error": error_details
+                }, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
             
     except Appointment.DoesNotExist:
         return Response({"error": "Appointment not found"}, status=status.HTTP_404_NOT_FOUND)
+    except requests.exceptions.Timeout:
+        return Response({"error": "Daily.co API timeout"}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except requests.exceptions.ConnectionError:
+        return Response({"error": "Cannot connect to Daily.co"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        print(f"Unexpected error in create_daily_room: {str(e)}")
+        return Response(
+            {"error": "Internal server error", "details": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
