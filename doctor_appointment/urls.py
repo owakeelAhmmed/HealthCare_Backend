@@ -5,6 +5,7 @@ from appointments import views as appointment_views
 from doctors import views as doctor_views
 from accounts import views as account_views
 
+
 router = routers.DefaultRouter()
 router.register('appointments', appointment_views.AppointmentViewSet)
 router.register('doctors', doctor_views.DoctorViewSet)
@@ -18,5 +19,5 @@ urlpatterns = [
     path('api/auth/', include('djoser.urls')),
     path('api/auth/', include('djoser.urls.jwt')),
     path('api/', include('appointments.urls')),
-    path('api/video/', include('video.urls')),
+    path('api/video-call/', include('video.urls')),
 ]
