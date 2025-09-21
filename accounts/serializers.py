@@ -4,29 +4,37 @@ from django.contrib.auth import authenticate
 from djoser.serializers import UserCreateSerializer
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 from django.contrib.auth.password_validation import validate_password
+from djoser.serializers import UserSerializer as BaseUserSerializer
 
 
 
-class CustomUserCreateSerializer(BaseUserCreateSerializer):
+# class CustomUserCreateSerializer(BaseUserCreateSerializer):
+#     class Meta(BaseUserCreateSerializer.Meta):
+#         model = User
+#         fields = [
+#             'id', 
+#             'username', 
+#             'email', 
+#             'first_name', 
+#             'last_name', 
+#             'user_type', 
+#             'phone', 
+#             'password'
+#         ]
+
+class UserCreateSerializer(BaseUserCreateSerializer):
     class Meta(BaseUserCreateSerializer.Meta):
         model = User
-        fields = [
-            'id', 
-            'username', 
-            'email', 
-            'first_name', 
-            'last_name', 
-            'user_type', 
-            'phone', 
-            'password'
-        ]
+        fields = ("id", "username", "email", "phone", "password", "user_type")
 
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
+class UserSerializer(BaseUserSerializer):
+    user_type_display = serializers.CharField(source="get_user_type_display", read_only=True)
+
+    class Meta(BaseUserSerializer.Meta):
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'user_type', 'phone']
+        fields = ("id", "username", "email", "phone", "user_type", "user_type_display")
 
-        
+
 class UserRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
