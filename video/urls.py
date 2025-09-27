@@ -1,9 +1,9 @@
 from django.urls import path
-from .views import create_daily_room, get_daily_token, start_video_call, end_video_call
+from . import views
 
 urlpatterns = [
-    path('daily-room/<int:appointment_id>/', create_daily_room, name='create-daily-room'),
-    path('daily-token/<int:appointment_id>/', get_daily_token, name='get-daily-token'),
-    path('start-call/<int:appointment_id>/', start_video_call, name='start-video-call'),
-    path('end-call/<int:appointment_id>/', end_video_call, name='end-video-call'),
+    path('stream-channel/<int:appointment_id>/', views.create_stream_channel, name='create_stream_channel'),
+    path('stream-token/<int:appointment_id>/', views.generate_stream_token, name='generate_stream_token'),
+    path('start-call/<int:appointment_id>/', views.start_video_call, name='start_video_call'),
+    path('end-call/<int:appointment_id>/', views.end_video_call, name='end_video_call'),
 ]

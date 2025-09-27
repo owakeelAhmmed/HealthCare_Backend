@@ -7,21 +7,6 @@ from django.contrib.auth.password_validation import validate_password
 from djoser.serializers import UserSerializer as BaseUserSerializer
 
 
-
-# class CustomUserCreateSerializer(BaseUserCreateSerializer):
-#     class Meta(BaseUserCreateSerializer.Meta):
-#         model = User
-#         fields = [
-#             'id', 
-#             'username', 
-#             'email', 
-#             'first_name', 
-#             'last_name', 
-#             'user_type', 
-#             'phone', 
-#             'password'
-#         ]
-
 class UserCreateSerializer(BaseUserCreateSerializer):
     class Meta(BaseUserCreateSerializer.Meta):
         model = User

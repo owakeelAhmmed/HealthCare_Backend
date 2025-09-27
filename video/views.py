@@ -1,208 +1,177 @@
-import requests
+import os
 from django.conf import settings
-from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from .models import VideoCallSession
-from .serializers import VideoCallSessionSerializer
+from stream_chat import StreamChat
 from appointments.models import Appointment
-from datetime import datetime, timedelta
-import uuid
+from django.contrib.auth import get_user_model
 from decouple import config
 
-# Daily.co API Key (এটি আপনার environment variable থেকে নিন)
-DAILY_API_KEY =config('dailyapi')
-DAILY_API_BASE = 'https://api.daily.co/v1'
+User = get_user_model()
 
-class VideoCallViewSet(viewsets.ModelViewSet):
-    queryset = VideoCallSession.objects.all()
-    serializer_class = VideoCallSessionSerializer
-    permission_classes = [IsAuthenticated]
+# Stream.io credentials
+STREAM_API_KEY = config('STREAM_API_KEY')
+STREAM_API_SECRET = config('STREAM_API_SECRET')
+
+# Initialize Stream.io client
+stream_client = StreamChat(api_key=STREAM_API_KEY, api_secret=STREAM_API_SECRET)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def create_daily_room(request, appointment_id):
+def create_stream_channel(request, appointment_id):
     """
-    Create a Daily.co room for video call
-    """
-    try:
-        appointment = Appointment.objects.get(id=appointment_id)
-        
-        # Check authorization - patient or doctor
-        user = request.user
-        if user.user_type == 1 and appointment.patient != user:
-            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
-        elif user.user_type == 2 and appointment.doctor.user != user:
-            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
-        
-        # Check if Daily API key is configured
-        if not DAILY_API_KEY:
-            return Response(
-                {"error": "Daily.co API key not configured"}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
-        # Create unique room name
-        room_name = f"appointment-{appointment_id}-{uuid.uuid4().hex[:8]}"
-        
-        # Create room on Daily.co
-        response = requests.post(
-            f"{DAILY_API_BASE}/rooms",
-            headers={
-                "Authorization": f"Bearer {DAILY_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "name": room_name,
-                "privacy": "private",
-                "properties": {
-                    "exp": int((datetime.now() + timedelta(hours=2)).timestamp()),
-                    "enable_chat": True,
-                    "enable_screenshare": True,
-                    "start_video_off": False,
-                    "start_audio_off": False,
-                }
-            },
-            timeout=30  # Add timeout
-        )
-        
-        # Better error handling for Daily.co API
-        if response.status_code == 200:
-            room_data = response.json()
-            
-            # Create or update video session record
-            video_session, created = VideoCallSession.objects.update_or_create(
-                appointment=appointment,
-                defaults={
-                    'room_id': room_name,
-                    'status': 'scheduled',
-                    'start_time': None,
-                    'end_time': None
-                }
-            )
-            
-            return Response({
-                "room_name": room_name,
-                "room_url": room_data['url'],
-                "session_id": video_session.id,
-                "message": "Daily.co room created successfully"
-            })
-        else:
-            # Log the detailed error from Daily.co
-            error_details = response.json() if response.content else response.text
-            print(f"Daily.co API Error: {response.status_code} - {error_details}")
-            
-            return Response(
-                {
-                    "error": "Failed to create Daily.co room",
-                    "details": f"Daily.co API returned {response.status_code}",
-                    "daily_error": error_details
-                }, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-            
-    except Appointment.DoesNotExist:
-        return Response({"error": "Appointment not found"}, status=status.HTTP_404_NOT_FOUND)
-    except requests.exceptions.Timeout:
-        return Response({"error": "Daily.co API timeout"}, status=status.HTTP_504_GATEWAY_TIMEOUT)
-    except requests.exceptions.ConnectionError:
-        return Response({"error": "Cannot connect to Daily.co"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-    except Exception as e:
-        print(f"Unexpected error in create_daily_room: {str(e)}")
-        return Response(
-            {"error": "Internal server error", "details": str(e)}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-    
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_daily_token(request, appointment_id):
-    """
-    Generate Daily.co meeting token for additional security
+    Create a Stream.io video call channel for an appointment
     """
     try:
         appointment = Appointment.objects.get(id=appointment_id)
         
-        # Check authorization
-        user = request.user
-        if user.user_type == 1 and appointment.patient != user:
-            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
-        elif user.user_type == 2 and appointment.doctor.user != user:
-            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+        # Check if user has permission to access this appointment
+        if request.user not in [appointment.patient, appointment.doctor.user]:
+            return Response(
+                {'error': 'Permission denied'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
         
-        # Get video session
-        video_session = VideoCallSession.objects.get(appointment=appointment)
+        # Create channel ID
+        channel_id = f"video_call_{appointment_id}"
         
-        # Generate meeting token
-        response = requests.post(
-            f"{DAILY_API_BASE}/meeting-tokens",
-            headers={
-                "Authorization": f"Bearer {DAILY_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "properties": {
-                    "room_name": video_session.room_id,
-                    "user_id": str(user.id),
-                    "user_name": user.get_full_name(),
-                    "is_owner": True,
-                    "exp": int((datetime.now() + timedelta(hours=2)).timestamp())
+        # Create channel members (doctor and patient)
+        doctor_id = f"doctor_{appointment.doctor.id}"
+        patient_id = f"patient_{appointment.patient.id}"
+        
+        # Create or get channel
+        channel = stream_client.channel(
+            "messaging", 
+            channel_id,
+            {
+                "name": f"Video Call - Appointment #{appointment_id}",
+                "members": [doctor_id, patient_id],
+                "created_by_id": patient_id if request.user == appointment.patient else doctor_id,
+                "custom": {
+                    "appointment_id": appointment_id,
+                    "type": "video_call",
+                    "doctor_name": f"Dr. {appointment.doctor.user.get_full_name()}",
+                    "patient_name": appointment.patient.get_full_name(),
+                    "consultation_fee": str(appointment.doctor.consultation_fee)
                 }
             }
         )
         
-        if response.status_code == 200:
-            token_data = response.json()
-            return Response({
-                "token": token_data['token'],
-                "room_name": video_session.room_id
-            })
-        else:
-            return Response({"error": "Failed to generate token"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-    except (Appointment.DoesNotExist, VideoCallSession.DoesNotExist):
-        return Response({"error": "Appointment or video session not found"}, status=status.HTTP_404_NOT_FOUND)
+        # Create the channel
+        channel.create(request.user.username or str(request.user.id))
+        
+        return Response({
+            'channel_id': channel_id,
+            'doctor_id': doctor_id,
+            'patient_id': patient_id,
+            'appointment_id': appointment_id
+        })
+        
+    except Appointment.DoesNotExist:
+        return Response(
+            {'error': 'Appointment not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_stream_token(request, appointment_id):
+    """
+    Generate Stream.io token for video call
+    """
+    try:
+        appointment = Appointment.objects.get(id=appointment_id)
+        
+        # Check if user has permission
+        if request.user not in [appointment.patient, appointment.doctor.user]:
+            return Response(
+                {'error': 'Permission denied'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Determine user role and ID
+        if request.user == appointment.patient:
+            user_id = f"patient_{appointment.patient.id}"
+            user_role = "patient"
+        else:
+            user_id = f"doctor_{appointment.doctor.id}"
+            user_role = "doctor"
+        
+        # Generate token
+        token = stream_client.create_token(user_id)
+        
+        return Response({
+            'token': token,
+            'user_id': user_id,
+            'api_key': STREAM_API_KEY,
+            'appointment_id': appointment_id,
+            'user_role': user_role
+        })
+        
+    except Appointment.DoesNotExist:
+        return Response(
+            {'error': 'Appointment not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def start_video_call(request, appointment_id):
     """
-    Mark video call as started
+    Start video call session
     """
     try:
         appointment = Appointment.objects.get(id=appointment_id)
-        video_session = VideoCallSession.objects.get(appointment=appointment)
         
-        # Update status and start time
-        video_session.status = 'ongoing'
-        video_session.start_time = datetime.now()
-        video_session.save()
+        # Update appointment status
+        appointment.status = 'in_progress'
+        appointment.save()
         
-        return Response({"message": "Video call started", "status": "ongoing"})
+        return Response({
+            'message': 'Video call started',
+            'appointment_id': appointment_id,
+            'status': appointment.status
+        })
         
-    except (Appointment.DoesNotExist, VideoCallSession.DoesNotExist):
-        return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Appointment.DoesNotExist:
+        return Response(
+            {'error': 'Appointment not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def end_video_call(request, appointment_id):
     """
-    Mark video call as completed
+    End video call session
     """
     try:
         appointment = Appointment.objects.get(id=appointment_id)
-        video_session = VideoCallSession.objects.get(appointment=appointment)
         
-        # Update status and end time
-        video_session.status = 'completed'
-        video_session.end_time = datetime.now()
-        video_session.save()
+        # Update appointment status
+        appointment.status = 'completed'
+        appointment.save()
         
-        return Response({"message": "Video call ended", "status": "completed"})
+        return Response({
+            'message': 'Video call ended',
+            'appointment_id': appointment_id,
+            'status': appointment.status
+        })
         
-    except (Appointment.DoesNotExist, VideoCallSession.DoesNotExist):
-        return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Appointment.DoesNotExist:
+        return Response(
+            {'error': 'Appointment not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
